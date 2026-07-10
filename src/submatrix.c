@@ -24,12 +24,12 @@ int main(void){
     //const unsigned int no_rows[] = {28};
     //const unsigned int no_cols[] = {31};
     //double missing[] = {0.05, 0.1, 0.2, 0.5, 0.7, 0.9};
-    //const unsigned int no_rows[] = {17, 20};
-    //const unsigned int no_cols[] = {18, 25};
+    const unsigned int no_rows[] = {17, 20};
+    const unsigned int no_cols[] = {18, 25};
     //double missing[] = {0.05, 0.1, 0.2, 0.5, 0.7, 0.9};
-    const unsigned int no_rows[] = {5, 7, 9, 12, 15};
-    const unsigned int no_cols[] = {3, 8, 9, 15, 12};
-    double missing[] = {0.05, 0.1, 0.2, 0.5, 0.7, 0.9};
+    //const unsigned int no_rows[] = {5, 7, 9, 12, 15};
+    //const unsigned int no_cols[] = {3, 8, 9, 15, 12};
+    double missing[] = {0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95};
     // const unsigned int no_rows[] = {7};
     // const unsigned int no_cols[] = {9};
     // double missing[] = {0.5};
@@ -46,13 +46,14 @@ int main(void){
   
     // if one wants more than one run
     // with the same params  
-    int T = 1;
+    int T = 10;
 
     for(int t = 0; t < T; t++){
         unsigned int seed = (unsigned int)time(NULL); 
         srand(seed); 
         for(int i = 0; i < no_matrices; i++){
             for(int j = 0; j < no_missing; j++){
+                /*
                 printf("%d rows, %d columns, %f missing.\n", no_rows[i], no_cols[i], missing[j]);
                 clock_gettime(CLOCK_MONOTONIC, &start);
 
@@ -63,12 +64,13 @@ int main(void){
                 printf("experiment: %.6f seconds\n", elapsed);
 
                 clock_gettime(CLOCK_MONOTONIC, &start);
-
+                */
                 better_experiment(no_rows[i], no_cols[i], missing[j], seed);
-
+                /*
                 clock_gettime(CLOCK_MONOTONIC, &end);
                 elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
                 printf("better_experiment: %.6f seconds\n", elapsed);
+                */
             }
         }
     }
