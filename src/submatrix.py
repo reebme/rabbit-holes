@@ -1,6 +1,136 @@
 import pandas as pd
 import numpy as np
 
+import warnings
+
+def prepare_big_dims(short_sides):
+    '''
+    Prepare a list of big matrix dimensions given a list(int) of s values.
+
+    Returns a list of tuples (row_number, col_number).
+    '''
+    big_dims = []
+    
+    for s in short_sides:
+        big_dims.extend([
+            (s, s),
+            (2 * s, s),
+            (s, 2 * s),
+        ])
+
+    return big_dims
+
+def calculate_complete_dims(alpha, p, q, n, d):
+    '''
+    alpha: P(element belongs in the planted block | element observed) = alpha
+    p: P(element missing) = p
+    q: realtive aspect ratio
+    n: no of rows in the big matrix
+    d: no of columns in the big matrix
+
+    Complete matrix has x rows and y columns.
+    
+    Area of the big matrix A_p = nd
+    Aspect ratio of the big matrix R = n/d
+    Aspect ratio of the planted matrix r = qR = x/y
+
+    Function returns (x,y) if it is possible to be planted in (n,d) matrix.
+    '''
+    # feasibility condition
+    beta = alpha * (1 - p)
+    if not beta <= q <= 1/beta:
+        return None
+    
+    y = d * np.sqrt(alpha * (1 - p) / q)
+    x = n * np.sqrt(alpha * q * (1 - p))
+
+    return (int(x), int(y))
+
+def generate_matrix_with_planted(n, d,
+                                 x, y,
+                                 seed,
+                                 frac_missing
+                                ):
+    '''
+    n: no of rows
+    d: no of cols
+    seed: the seed for the random no generator
+    frac_missing: P(element is missing) = frac_missing
+
+    Planted matrix has x rows and y columns.
+    '''
+    rng = np.random.default_rng(seed)
+    
+    big = rng.standard_normal(size=(n, d))
+    complete = rng.standard_normal(size=(x, y))
+
+    rows = np.sort(rng.choice(n, x, replace=False))
+    cols = np.sort(rng.choice(d, y, replace=False))
+    
+    big[np.ix_(rows, cols)] = complete
+
+    not_planted_mask = extract_mask(big, rows, cols)
+    apply_missingness(big, not_planted_mask, frac_missing, rng)
+
+    return big
+
+def basic_prune_to_complete(matrix: np.ndarray):
+    # convert to boolean missing
+    matrix = np.isnan(matrix)
+    # extract dimensions
+    no_rows, no_cols = matrix.shape
+
+    # copy the matrix to be pruned
+    current = matrix.copy()
+
+    # the total number of missing elements
+    no_missing = current.sum()
+
+    row_idx = np.arange(no_rows)
+    col_idx = np.arange(no_cols)
+
+    iteration_info = []
+   
+    i = 0 
+    while no_rows > 0 and no_cols > 0 and no_missing > 0:
+        # missing elements across rows
+        rows_missing = current.sum(axis=1)
+        # missing elements across columns
+        cols_missing = current.sum(axis=0)
+        # check if contamination is worse in rows or columns
+        # remove a column
+        if max(rows_missing / no_cols) <= max(cols_missing / no_rows):
+            # extract the worst column index
+            worst_col = np.argmax(cols_missing)
+            # remove from index
+            col_idx = np.delete(col_idx, worst_col)
+            
+        # remove a row
+        else:
+            # extract the worst row index
+            worst_row = np.argmax(rows_missing)
+            row_idx = np.delete(row_idx, worst_row)
+
+        current = matrix[np.ix_(row_idx, col_idx)]
+        no_rows, no_cols = current.shape
+        no_missing = current.sum()
+        
+        iteration_info.append({
+            "i": i,
+            "no_pruned_rows": matrix.shape[0] - no_rows,
+            "no_pruned_cols": matrix.shape[1] - no_cols,
+            "eff_lr": -1,
+            "missing_no": no_missing,
+            "missing_frac": no_missing/matrix.size
+        })
+
+        i+= 1
+        
+    if len(row_idx) > 0 and len(col_idx) > 0:
+        return row_idx, col_idx, pd.DataFrame(iteration_info)
+    else:
+        return None, None, pd.DataFrame(iteration_info)
+
 def adaptive_prune_to_complete(
     data: pd.DataFrame,
     max_iter:int = 100,
