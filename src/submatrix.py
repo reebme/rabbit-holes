@@ -261,3 +261,24 @@ def apply_missingness(matrix, available_mask, missingness, rng):
 
     missing_idx = rng.choice(available_idx, size = no_missing, replace = False)
     matrix.flat[missing_idx] = np.nan
+
+# experiment assessment helper
+def distinct_solutions(matrices):
+    ds = matrices[matrices["found_area"] > 0]
+    ds = ds.sort_values(by=['row_cnt','col_cnt', 'C', 'time_sec'], ascending=[False, False, True, True])
+    return ds.groupby(by='row_cnt', as_index=False).first()
+
+# experiment assessment helper
+def Pareto_frontier(matrices):
+    ds = distinct_solutions(matrices)
+    ds = ds.sort_values(by=['row_cnt', 'col_cnt'], ascending=[False, False])
+    ds.reset_index(inplace=True)
+    pf_idx = np.zeros(len(ds), dtype=bool)
+    no_rows = 0
+    no_cols = 0
+    for solution in ds.itertuples():
+        if (solution.row_cnt > no_rows) or (solution.col_cnt > no_cols):
+            no_rows = solution.row_cnt
+            no_cols = solution.col_cnt
+            pf_idx[solution.Index] = True
+    return ds.loc[pf_idx]
