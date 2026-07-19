@@ -58,7 +58,7 @@ def run_benchmark(task):
     # iterate over Cs
     for C in Cs:
         start = time.perf_counter()
-        found_rows, found_cols, iter_info = submatrix.adaptive_prune_to_complete(df, max_iter=3000, shrink_coeff=C)
+        found_rows, found_cols, iter_info = submatrix.adaptive_prune_to_complete_with_completion(df, max_iter=3000, shrink_coeff=C)
         elapsed = time.perf_counter() - start
 
         if found_rows is not None and found_cols is not None:
@@ -104,7 +104,7 @@ def run_benchmark(task):
     ### basic prune to complete ###
 
     start = time.perf_counter()
-    found_rows, found_cols, iter_info = submatrix.basic_prune_to_complete(big)
+    found_rows, found_cols, iter_info = submatrix.basic_prune_to_complete_with_completion(big)
     elapsed = time.perf_counter() - start
     
     if found_rows is not None and found_cols is not None:
