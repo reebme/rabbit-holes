@@ -131,6 +131,72 @@ def basic_prune_to_complete(matrix: np.ndarray):
     else:
         return None, None, pd.DataFrame(iteration_info)
 
+def basic_prune_to_complete_with_completion(matrix: np.ndarray):
+    # convert to boolean missing
+    matrix = np.isnan(matrix)
+    # extract dimensions
+    no_rows, no_cols = matrix.shape
+
+    # copy the matrix to be pruned
+    current = matrix.copy()
+
+    # the total number of missing elements
+    no_missing = current.sum()
+
+    row_idx = np.arange(no_rows)
+    col_idx = np.arange(no_cols)
+
+    iteration_info = []
+   
+    i = 0 
+    while no_rows > 0 and no_cols > 0 and no_missing > 0:
+        # missing elements across rows
+        rows_missing = current.sum(axis=1)
+        # missing elements across columns
+        cols_missing = current.sum(axis=0)
+        # check if contamination is worse in rows or columns
+        # remove a column
+        if max(rows_missing / no_cols) <= max(cols_missing / no_rows):
+            # extract the worst column index
+            worst_col = np.argmax(cols_missing)
+            # remove from index
+            col_idx = np.delete(col_idx, worst_col)
+            
+        # remove a row
+        else:
+            # extract the worst row index
+            worst_row = np.argmax(rows_missing)
+            row_idx = np.delete(row_idx, worst_row)
+
+        # reintroduce rows complete over the column subset
+        row_complete_mask = matrix[:, col_idx].sum(axis=1) == 0
+        row_idx = np.union1d(row_idx, np.flatnonzero(row_complete_mask))
+
+        # reintroduce columns complete over the row subset
+        col_complete_mask = matrix[row_idx, :].sum(axis=0) == 0
+        col_idx = np.union1d(col_idx, np.flatnonzero(col_complete_mask))
+
+        current = matrix[np.ix_(row_idx, col_idx)]
+        no_missing = current.sum()
+        
+        iteration_info.append({
+            "i": i,
+            "no_pruned_rows": no_rows - current.shape[0],
+            "no_pruned_cols": no_cols - current.shape[1],
+            "eff_lr": -1,
+            "missing_no": no_missing,
+            "missing_frac": no_missing/matrix.size
+        })
+
+        no_rows, no_cols = current.shape
+
+        i+= 1
+        
+    if len(row_idx) > 0 and len(col_idx) > 0:
+        return row_idx, col_idx, pd.DataFrame(iteration_info)
+    else:
+        return None, None, pd.DataFrame(iteration_info)
+
 def adaptive_prune_to_complete(
     data: pd.DataFrame,
     max_iter:int = 100,
