@@ -3,6 +3,8 @@ import numpy as np
 
 import warnings
 
+### matrix generation ###
+
 def prepare_big_dims(short_sides):
     '''
     Prepare a list of big matrix dimensions given a list(int) of s values.
@@ -46,6 +48,19 @@ def calculate_complete_dims(alpha, p, q, n, d):
 
     return (int(x), int(y))
 
+def extract_mask(matrix, excluded_rows, excluded_cols):
+    excluded_mask = np.zeros(matrix.shape, dtype=bool)
+    excluded_mask[np.ix_(excluded_rows, excluded_cols)] = True
+    return ~excluded_mask
+
+def apply_missingness(matrix, available_mask, missingness, rng):
+    # assumes applying missingness is possible
+    no_missing = int(round(missingness * matrix.size))
+    available_idx = np.flatnonzero(available_mask)
+
+    missing_idx = rng.choice(available_idx, size = no_missing, replace = False)
+    matrix.flat[missing_idx] = np.nan
+
 def generate_matrix_with_planted(n, d,
                                  x, y,
                                  seed,
@@ -73,6 +88,8 @@ def generate_matrix_with_planted(n, d,
     apply_missingness(big, not_planted_mask, frac_missing, rng)
 
     return big
+
+### complete submatrix algorithms ###
 
 def basic_prune_to_complete(matrix: np.ndarray):
     # convert to boolean missing
@@ -450,36 +467,171 @@ def adaptive_prune_to_complete_with_completion(
         )
         return None, None, iteration_info
 
-def extract_mask(matrix, excluded_rows, excluded_cols):
-    excluded_mask = np.zeros(matrix.shape, dtype=bool)
-    excluded_mask[np.ix_(excluded_rows, excluded_cols)] = True
-    return ~excluded_mask
+def choose_to_prune(
+    rng: np.random.Generator,
+    candidates: np.ndarray,
+    p_aggr: float = 0.1
+):
+    '''
+    p_aggr: probability of an aggresive pruning move
+    '''
+    no_candidates = len(candidates)
 
-def apply_missingness(matrix, available_mask, missingness, rng):
-    # assumes applying missingness is possible
-    no_missing = int(round(missingness * matrix.size))
-    available_idx = np.flatnonzero(available_mask)
+    if no_candidates == 0:
+        return np.array([], dtype=candidates.dtype)
+    
+    if rng.random() > p_aggr and no_candidates > 1:
+        no_pruned = rng.integers(1, min(no_candidates, 3))
+    else:
+        no_pruned = len(candidates)
 
-    missing_idx = rng.choice(available_idx, size = no_missing, replace = False)
-    matrix.flat[missing_idx] = np.nan
+    return rng.choice(candidates, no_pruned, replace=False)
 
-# experiment assessment helper
-def distinct_solutions(matrices):
-    ds = matrices[matrices["found_area"] > 0]
-    ds = ds.sort_values(by=['row_cnt','col_cnt', 'C', 'time_sec'], ascending=[False, False, True, True])
-    return ds.groupby(by='row_cnt', as_index=False).first()
+def random_prune_to_complete(
+    matrix: np.ndarray,
+    threshold_coeff: float
+):
+    if matrix is None:
+        raise ValueError("No matrix provided")
+    
+    # no of rows, no of cols
+    n, d = matrix.shape
+    if n == 0 or d == 0:
+        raise ValueError("Degenerate matrix provided.")
+    
+    missing_matrix = np.isnan(matrix)
+    current_matrix = missing_matrix.copy()
 
-# experiment assessment helper
-def Pareto_frontier(matrices):
-    ds = distinct_solutions(matrices)
-    ds = ds.sort_values(by=['row_cnt', 'col_cnt'], ascending=[False, False])
-    ds.reset_index(inplace=True)
-    pf_idx = np.zeros(len(ds), dtype=bool)
-    no_rows = 0
-    no_cols = 0
-    for solution in ds.itertuples():
-        if (solution.row_cnt > no_rows) or (solution.col_cnt > no_cols):
-            no_rows = solution.row_cnt
-            no_cols = solution.col_cnt
-            pf_idx[solution.Index] = True
-    return ds.loc[pf_idx]
+    rng = np.random.default_rng()
+
+    rows_idx = np.arange(n)
+    cols_idx = np.arange(d)
+
+    # overall missingness
+    no_missing = missing_matrix.sum()
+    
+    while no_missing > 0:
+        # print(f"i = {i}")
+        # no of missing elements per row
+        rows_miss = current_matrix.sum(axis=1)
+        # no of missing elements per column
+        cols_miss = current_matrix.sum(axis=0)
+        # print(rows_miss, col_miss)
+
+        #threshold_coeff = 0.1 / i
+        
+        # if max missing fraction in rows <= max missing fraction
+        # prune column axis
+        # else prune row axis
+        # introduces small bias towards keeping rows
+        if np.max(rows_miss/len(cols_idx)) <= np.max(cols_miss/len(rows_idx)):
+            ### prune columns ###
+            # print("Prune columns")
+            # print(col_miss)
+            worst_column = np.max(cols_miss)
+            
+            # prune columns with at least col_threshold missing elements
+            col_threshold = worst_column * threshold_coeff
+            # print(col_threshold)
+            candidates_to_prune = np.flatnonzero(cols_miss >= col_threshold)
+            # print(f"candidates: {candidates_to_prune}")
+            cols_to_prune = choose_to_prune(rng, candidates_to_prune)
+            # print(cols_to_prune)
+            cols_idx = np.delete(cols_idx, cols_to_prune)
+            # print(cols_idx)
+    
+            # solution was not found
+            if len(cols_idx) == 0:
+                return None, None
+    
+        else:
+            ### prune rows ###
+            # print("Prune rows")
+            # print(rows_miss)
+            worst_row = np.max(rows_miss)
+            
+            row_threshold = worst_row * threshold_coeff
+            # print(row_threshold)
+            candidates_to_prune = np.flatnonzero(rows_miss >= row_threshold)
+            # print(f"candidates: {candidates_to_prune}")
+            rows_to_prune = choose_to_prune(rng, candidates_to_prune)
+            rows_idx = np.delete(rows_idx, rows_to_prune)
+            # print(rows_idx)
+
+            if len(rows_idx) == 0:
+                return None, None
+
+        # add rows complete over the solution
+        compl_rows = np.flatnonzero(np.sum(missing_matrix[:, cols_idx], axis=1) == 0)
+        rows_idx = np.union1d(rows_idx, compl_rows)
+        # add columns complete over the current solution
+        compl_cols = np.flatnonzero(np.sum(missing_matrix[rows_idx, :], axis = 0) == 0)
+        cols_idx = np.union1d(cols_idx, compl_cols)
+
+        current_matrix = missing_matrix[np.ix_(rows_idx, cols_idx)]
+        no_missing = current_matrix.sum()
+        # print(no_missing)
+
+    return rows_idx, cols_idx
+
+
+### solution analysis ###
+
+def distinct_bicliques(results: pd.DataFrame):
+    '''
+    results must contain 'found_rows' and 'found_cols' columns.
+    Each column has a ndarray of indices of rows or columns
+    of the found biclique.
+    
+    The function doesn't modify the original data frame.
+    '''
+    return (
+        results.assign(
+            _rk = results['found_rows'].map(lambda x: tuple(sorted(x))),
+            _ck = results['found_cols'].map(lambda x: tuple(sorted(x)))
+        )
+        .drop_duplicates(subset=["_rk", "_ck"])
+        .drop(["_rk", "_ck"], axis=1)
+        .reset_index(drop=True)
+    )
+
+def pareto_front(results: pd.DataFrame):
+    '''
+    results must contain 'found_rows' and 'found_cols' columns.
+    Each column has a ndarray of indices of rows or columns
+    of the found biclique.
+    
+    The function doesn't modify the original data frame.
+    '''
+    df = distinct_bicliques(results)
+
+    df['no_rows'] = df['found_rows'].map(len)
+    df['no_cols'] = df['found_cols'].map(len)
+    df['rows_set'] = df['found_rows'].map(frozenset)
+    df['cols_set'] = df['found_cols'].map(frozenset)
+    
+    df.sort_values(by=['no_rows', 'no_cols'], ascending=[False, False], inplace=True)
+
+    # the non dominated solutions
+    pf = []
+    # indices of the non dominated solutions
+    keep = []
+    
+    for idx, row in df.iterrows():
+        candidate_rows, candidate_cols = row[['rows_set', 'cols_set']]
+        candidate_dominated = False
+        
+        for pf_rows, pf_cols in pf:
+            if pf_rows >= candidate_rows and pf_cols >= candidate_cols:
+                candidate_dominated = True
+                break
+
+        if not candidate_dominated:
+            pf.append((candidate_rows, candidate_cols))
+            keep.append(idx)
+
+    return (
+        df.loc[keep]
+        .drop(["no_rows", "no_cols", "rows_set", "cols_set"], axis=1)
+        .reset_index(drop=True)
+    )
